@@ -246,51 +246,52 @@ export default function App() {
     setExporting(true);
     try {
       const canvasEl = canvasRef.current;
-      const rect     = canvasEl.getBoundingClientRect();
-      const dpr      = window.devicePixelRatio || 1;
+      const savedId  = activeLayerId;
 
-      // Page size in CSS pixels — jsPDF 'px' unit maps 1-to-1 with CSS px
-      const pageW = rect.width;
-      const pageH = rect.height;
-      const pdf   = new jsPDF({ orientation: 'landscape', unit: 'px', format: [pageW, pageH] });
-      const savedId = activeLayerId;
+      // Measure the canvas element's exact position & size in the viewport
+      const rect = canvasEl.getBoundingClientRect();
+      const pageW = Math.round(rect.width);
+      const pageH = Math.round(rect.height);
+
+      const pdf = new jsPDF({ orientation: 'landscape', unit: 'px', format: [pageW, pageH] });
 
       for (let i = 0; i < layers.length; i++) {
         setActiveLayerId(layers[i].id);
         setSelectedId(null);
-        await new Promise(r => setTimeout(r, 220));
+        // Give React time to repaint the new active layer
+        await new Promise(r => setTimeout(r, 250));
 
-        // Capture at devicePixelRatio for sharpness.
-        // html2canvas gives us an internal canvas of (rect.width * dpr) x (rect.height * dpr).
-        // We then tell jsPDF to render that image at exactly (pageW x pageH) CSS-px,
-        // which means no stretching — it just down-samples to the page size.
-        const snap = await html2canvas(canvasEl, {
-          backgroundColor: tk.canvasBg,
-          scale: dpr,
+        // Capture the WHOLE document at scale:1, then crop to exactly the canvas element.
+        // html2canvas x/y are document coordinates (not viewport), so add scroll offsets.
+        const scrollX = window.scrollX || window.pageXOffset || 0;
+        const scrollY = window.scrollY || window.pageYOffset || 0;
+
+        const snap = await html2canvas(document.body, {
+          backgroundColor: null,
+          scale: 1,
           useCORS: true,
           allowTaint: true,
           logging: false,
-          width:  rect.width,
-          height: rect.height,
-          x: 0,
-          y: 0,
+          // Crop to the canvas element only
+          x:      rect.left + scrollX,
+          y:      rect.top  + scrollY,
+          width:  pageW,
+          height: pageH,
+          windowWidth:  document.documentElement.scrollWidth,
+          windowHeight: document.documentElement.scrollHeight,
         });
 
-        const imgW = snap.width;   // physical pixels = pageW * dpr
-        const imgH = snap.height;  // physical pixels = pageH * dpr
-
+        // snap is now exactly pageW x pageH pixels — add to PDF 1:1
         const imgData = snap.toDataURL('image/png');
         if (i > 0) pdf.addPage([pageW, pageH], 'landscape');
-
-        // Place image at CSS-px dimensions so it fits the page 1:1
         pdf.addImage(imgData, 'PNG', 0, 0, pageW, pageH, undefined, 'FAST');
 
-        // Layer label
+        // Layer label at bottom-left
         pdf.setFontSize(11);
         pdf.setTextColor(0, 180, 220);
         pdf.text(
           `${layers[i].name}  ·  ${layers[i].items.length} item${layers[i].items.length !== 1 ? 's' : ''}`,
-          12, pageH - 8
+          10, pageH - 8
         );
       }
 
