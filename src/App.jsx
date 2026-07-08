@@ -245,26 +245,53 @@ export default function App() {
   const exportToPDF = async () => {
     setExporting(true);
     try {
-      const canvas = canvasRef.current;
-      const rect   = canvas.getBoundingClientRect();
-      const pdf    = new jsPDF({ orientation: 'landscape', unit: 'px', format: [rect.width, rect.height] });
+      const canvasEl = canvasRef.current;
+      const rect     = canvasEl.getBoundingClientRect();
+      const dpr      = window.devicePixelRatio || 1;
+
+      // Page size in CSS pixels — jsPDF 'px' unit maps 1-to-1 with CSS px
+      const pageW = rect.width;
+      const pageH = rect.height;
+      const pdf   = new jsPDF({ orientation: 'landscape', unit: 'px', format: [pageW, pageH] });
       const savedId = activeLayerId;
 
       for (let i = 0; i < layers.length; i++) {
         setActiveLayerId(layers[i].id);
         setSelectedId(null);
-        await new Promise(r => setTimeout(r, 200));
+        await new Promise(r => setTimeout(r, 220));
 
-        const snap = await html2canvas(canvas, {
-          backgroundColor: tk.canvasBg, scale: 1.5,
-          useCORS: true, allowTaint: true, logging: false,
+        // Capture at devicePixelRatio for sharpness.
+        // html2canvas gives us an internal canvas of (rect.width * dpr) x (rect.height * dpr).
+        // We then tell jsPDF to render that image at exactly (pageW x pageH) CSS-px,
+        // which means no stretching — it just down-samples to the page size.
+        const snap = await html2canvas(canvasEl, {
+          backgroundColor: tk.canvasBg,
+          scale: dpr,
+          useCORS: true,
+          allowTaint: true,
+          logging: false,
+          width:  rect.width,
+          height: rect.height,
+          x: 0,
+          y: 0,
         });
+
+        const imgW = snap.width;   // physical pixels = pageW * dpr
+        const imgH = snap.height;  // physical pixels = pageH * dpr
+
         const imgData = snap.toDataURL('image/png');
-        if (i > 0) pdf.addPage();
-        pdf.addImage(imgData, 'PNG', 0, 0, rect.width, rect.height);
-        pdf.setFontSize(13);
+        if (i > 0) pdf.addPage([pageW, pageH], 'landscape');
+
+        // Place image at CSS-px dimensions so it fits the page 1:1
+        pdf.addImage(imgData, 'PNG', 0, 0, pageW, pageH, undefined, 'FAST');
+
+        // Layer label
+        pdf.setFontSize(11);
         pdf.setTextColor(0, 180, 220);
-        pdf.text(`${layers[i].name}  |  ${layers[i].items.length} items`, 12, rect.height - 10);
+        pdf.text(
+          `${layers[i].name}  ·  ${layers[i].items.length} item${layers[i].items.length !== 1 ? 's' : ''}`,
+          12, pageH - 8
+        );
       }
 
       setActiveLayerId(savedId);
