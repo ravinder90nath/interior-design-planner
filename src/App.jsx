@@ -24,7 +24,7 @@ import AddIcon from '@mui/icons-material/Add';
 import CloseIcon from '@mui/icons-material/Close';
 import DarkModeIcon from '@mui/icons-material/DarkMode';
 import LightModeIcon from '@mui/icons-material/LightMode';
-import html2canvas from 'html2canvas';
+
 import jsPDF from 'jspdf';
 
 // ── Per-mode design tokens ────────────────────────────────────────────────────
@@ -87,7 +87,7 @@ let layerIdCounter = 1;
 const makeDefaultLayer = (name) => ({ id: layerIdCounter++, name, blueprintImg: null, items: [] });
 
 export default function App() {
-  const [mode, setMode]             = useState('dark');
+  const [mode, setMode]             = useState('light');
   const [layers, setLayers]         = useState([makeDefaultLayer('Layer 1')]);
   const [activeLayerId, setActiveLayerId] = useState(1);
   const [selectedId, setSelectedId] = useState(null);
@@ -241,54 +241,127 @@ export default function App() {
     }));
   }, [activeLayerId]);
 
-  // ── Export PDF ────────────────────────────────────────────────────────────
+  // ── Export PDF ─ direct canvas rendering (no html2canvas) ───────────────
   const exportToPDF = async () => {
     setExporting(true);
     try {
-      const canvasEl = canvasRef.current;
-      const savedId  = activeLayerId;
+      const containerEl = canvasRef.current;
+      const rect        = containerEl.getBoundingClientRect();
+      const pageW       = Math.round(rect.width);
+      const pageH       = Math.round(rect.height);
+      const SCALE       = 2; // retina quality
 
-      // Measure the canvas element's exact position & size in the viewport
-      const rect = canvasEl.getBoundingClientRect();
-      const pageW = Math.round(rect.width);
-      const pageH = Math.round(rect.height);
+      const pdf     = new jsPDF({ orientation: 'landscape', unit: 'px', format: [pageW, pageH] });
+      const savedId = activeLayerId;
 
-      const pdf = new jsPDF({ orientation: 'landscape', unit: 'px', format: [pageW, pageH] });
+      // Helper: draw one layer onto an offscreen <canvas> and return dataURL
+      const renderLayerToDataURL = (layer) => new Promise((resolve) => {
+        const offscreen = document.createElement('canvas');
+        offscreen.width  = pageW * SCALE;
+        offscreen.height = pageH * SCALE;
+        const ctx = offscreen.getContext('2d');
+        ctx.scale(SCALE, SCALE);
+
+        // ── Background ──────────────────────────────────────────────────────
+        const bgColor = mode === 'dark' ? '#0C0E16' : '#F7F9FC';
+        ctx.fillStyle = bgColor;
+        ctx.fillRect(0, 0, pageW, pageH);
+
+        // ── Grid ────────────────────────────────────────────────────────────
+        if (showGrid) {
+          const gridColor = mode === 'dark' ? '#1A1D2A' : '#D4DCE8';
+          ctx.strokeStyle = gridColor;
+          ctx.lineWidth   = 0.5;
+          const step = 32;
+          for (let x = 0; x <= pageW; x += step) {
+            ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, pageH); ctx.stroke();
+          }
+          for (let y = 0; y <= pageH; y += step) {
+            ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(pageW, y); ctx.stroke();
+          }
+        }
+
+        // ── Blueprint image ─────────────────────────────────────────────────
+        const drawIcons = () => {
+          // ── Device icons via emoji/text fallback + colored boxes ───────────
+          const iconMap = {
+            tv:      '📺', speaker: '🔊', camera: '📷', light: '💡',
+            ac:      '❄️', door:    '🚪', chair:  '🪑', fridge: '🧊',
+            bed:     '🛏️', bath:    '🛁',
+          };
+          const colorMap = {
+            tv: '#00BFFF', speaker: '#A78BFA', camera: '#F472B6', light: '#FBBF24',
+            ac: '#22D3EE', door: '#4ADE80', chair: '#FB923C', fridge: '#C084FC',
+            bed: '#34D399', bath: '#60A5FA',
+          };
+
+          layer.items.forEach(item => {
+            const color = colorMap[item.type] || '#00D4FF';
+            const emoji = iconMap[item.type] || '📦';
+            ctx.save();
+            // Translate to icon center, apply rotation
+            ctx.translate(item.x + 24, item.y + 24);
+            ctx.rotate((item.rotation * Math.PI) / 180);
+
+            // Box background
+            ctx.fillStyle = color + '33';
+            ctx.strokeStyle = color + 'BB';
+            ctx.lineWidth = 1.5;
+            const r = 6;
+            const s = 24;
+            ctx.beginPath();
+            ctx.roundRect(-s, -s, s * 2, s * 2, r);
+            ctx.fill();
+            ctx.stroke();
+
+            // Emoji icon centered
+            ctx.font = '22px serif';
+            ctx.textAlign    = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillStyle = color;
+            ctx.fillText(emoji, 0, 1);
+
+            ctx.restore();
+          });
+
+          resolve(offscreen.toDataURL('image/png'));
+        };
+
+        if (layer.blueprintImg) {
+          const img = new Image();
+          img.crossOrigin = 'anonymous';
+          img.onload = () => {
+            // Draw blueprint with correct aspect ratio centered in the page
+            const imgAspect  = img.width / img.height;
+            const pageAspect = pageW / pageH;
+            let drawW, drawH, drawX, drawY;
+            if (imgAspect > pageAspect) {
+              drawW = pageW; drawH = pageW / imgAspect;
+              drawX = 0;     drawY = (pageH - drawH) / 2;
+            } else {
+              drawH = pageH; drawW = pageH * imgAspect;
+              drawX = (pageW - drawW) / 2; drawY = 0;
+            }
+            ctx.globalAlpha = mode === 'dark' ? 0.5 : 0.6;
+            ctx.drawImage(img, drawX, drawY, drawW, drawH);
+            ctx.globalAlpha = 1;
+            drawIcons();
+          };
+          img.onerror = () => drawIcons();
+          img.src = layer.blueprintImg;
+        } else {
+          drawIcons();
+        }
+      });
 
       for (let i = 0; i < layers.length; i++) {
-        setActiveLayerId(layers[i].id);
-        setSelectedId(null);
-        // Give React time to repaint the new active layer
-        await new Promise(r => setTimeout(r, 250));
-
-        // Capture the WHOLE document at scale:1, then crop to exactly the canvas element.
-        // html2canvas x/y are document coordinates (not viewport), so add scroll offsets.
-        const scrollX = window.scrollX || window.pageXOffset || 0;
-        const scrollY = window.scrollY || window.pageYOffset || 0;
-
-        const snap = await html2canvas(document.body, {
-          backgroundColor: null,
-          scale: 1,
-          useCORS: true,
-          allowTaint: true,
-          logging: false,
-          // Crop to the canvas element only
-          x:      rect.left + scrollX,
-          y:      rect.top  + scrollY,
-          width:  pageW,
-          height: pageH,
-          windowWidth:  document.documentElement.scrollWidth,
-          windowHeight: document.documentElement.scrollHeight,
-        });
-
-        // snap is now exactly pageW x pageH pixels — add to PDF 1:1
-        const imgData = snap.toDataURL('image/png');
+        const imgData = await renderLayerToDataURL(layers[i]);
         if (i > 0) pdf.addPage([pageW, pageH], 'landscape');
         pdf.addImage(imgData, 'PNG', 0, 0, pageW, pageH, undefined, 'FAST');
 
-        // Layer label at bottom-left
+        // Layer label
         pdf.setFontSize(11);
-        pdf.setTextColor(0, 180, 220);
+        pdf.setTextColor(0, 153, 187);
         pdf.text(
           `${layers[i].name}  ·  ${layers[i].items.length} item${layers[i].items.length !== 1 ? 's' : ''}`,
           10, pageH - 8
