@@ -56,7 +56,10 @@ export const ProjectsProvider = ({ children }) => {
     const updated = projects.filter(p => p.id !== id);
     persist(updated);
     // Also remove saved board state
-    try { localStorage.removeItem(`idt_board_${id}`); } catch {}
+    try {
+      localStorage.removeItem(`idt_board_${id}`);
+      localStorage.removeItem(`idt_zones_${id}`);
+    } catch {}
   }, [projects, persist]);
 
   const renameProject = useCallback((id, name) => {

@@ -12,16 +12,23 @@ import PictureAsPdfIcon from '@mui/icons-material/PictureAsPdf';
 import { useApp } from '../../context/AppContext';
 import ToolStrip from './ToolStrip';
 import { useLayers } from '../../context/LayersContext';
+import { fileToDataURL } from '../../utils/fileToDataURL';
 
 const Toolbar = ({ onExportPDF, exporting }) => {
   const { mode, toggleMode, showGrid, toggleGrid, tk } = useApp();
   const { items, selectedId, setBlueprintImg, deleteItem, rotateItem, clearItems } = useLayers();
   const fileRef = useRef(null);
 
-  const handleUpload = (e) => {
+  const handleUpload = async (e) => {
     const file = e.target.files[0];
     if (!file) return;
-    setBlueprintImg(URL.createObjectURL(file));
+    try {
+      // Convert to base64 so it persists in localStorage across reloads
+      const dataUrl = await fileToDataURL(file);
+      setBlueprintImg(dataUrl);
+    } catch (err) {
+      console.error('Failed to read blueprint image:', err);
+    }
     e.target.value = '';
   };
 

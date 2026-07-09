@@ -97,7 +97,7 @@ const EditorPage = () => {
   return (
     <AppProvider>
       <LayersProvider projectId={projectId}>
-        <ZonesProvider>
+        <ZonesProvider projectId={projectId}>
           <ToolProvider>
             <EditorLayout project={project} />
           </ToolProvider>

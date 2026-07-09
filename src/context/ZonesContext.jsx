@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useCallback } from 'react';
+import React, { createContext, useContext, useState, useCallback, useEffect } from 'react';
 
 const ZonesContext = createContext(null);
 
@@ -18,9 +18,23 @@ const ZONE_COLORS = [
 ];
 
 export const ZONE_SHAPES = {
-  RECT:    'rect',     // bounding box: x1Pct,y1Pct,x2Pct,y2Pct
-  ELLIPSE: 'ellipse',  // bounding box: x1Pct,y1Pct,x2Pct,y2Pct (ellipse inscribed in box)
-  POLYGON: 'polygon',  // points: [{x,y}, ...] all in 0-1 fraction space
+  RECT:    'rect',
+  ELLIPSE: 'ellipse',
+  POLYGON: 'polygon',
+};
+
+const STORAGE_KEY = (id) => `idt_zones_${id}`;
+
+const loadZones = (projectId) => {
+  try {
+    const saved = localStorage.getItem(STORAGE_KEY(projectId));
+    if (saved) return JSON.parse(saved);
+  } catch {}
+  return null;
+};
+
+const saveZones = (projectId, data) => {
+  try { localStorage.setItem(STORAGE_KEY(projectId), JSON.stringify(data)); } catch {}
 };
 
 /**
@@ -29,10 +43,30 @@ export const ZONE_SHAPES = {
  *
  * Rect / Ellipse zones: { x1Pct, y1Pct, x2Pct, y2Pct }
  * Polygon zones:        { points: [{x,y}, ...] }
+ *
+ * Persisted to localStorage per project, same pattern as LayersContext.
  */
-export const ZonesProvider = ({ children }) => {
-  const [zones, setZones]                   = useState([]);
+export const ZonesProvider = ({ children, projectId }) => {
+  const saved = projectId ? loadZones(projectId) : null;
+
+  const [zones, setZones]                   = useState(saved?.zones ?? []);
   const [selectedZoneId, setSelectedZoneId] = useState(null);
+
+  // Keep the id counter ahead of any restored zones so new ids never collide
+  useEffect(() => {
+    if (saved?.zones?.length) {
+      const maxId = Math.max(...saved.zones.map(z => z.id), 0);
+      zoneCounter = Math.max(zoneCounter, maxId + 1);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Auto-save to localStorage whenever zones change
+  useEffect(() => {
+    if (projectId) {
+      saveZones(projectId, { zones });
+    }
+  }, [zones, projectId]);
 
   const nextColor = (id) => ZONE_COLORS[(id - 1) % ZONE_COLORS.length];
 
