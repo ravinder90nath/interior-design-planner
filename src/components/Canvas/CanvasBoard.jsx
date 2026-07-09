@@ -2,25 +2,28 @@ import React, { useRef, useCallback, useState, useEffect } from 'react';
 import { Box, Typography } from '@mui/material';
 import CloudUploadIcon from '@mui/icons-material/CloudUpload';
 
-import { useApp }    from '../../context/AppContext';
-import { useLayers } from '../../context/LayersContext';
+import { useApp }      from '../../context/AppContext';
+import { useLayers }   from '../../context/LayersContext';
+import { useZones }    from '../../context/ZonesContext';
+import { useTool, TOOLS } from '../../context/ToolContext';
 import { GRID_SIZE, ICON_SIZE } from '../../constants';
-import useDrag       from '../../hooks/useDrag';
-import useViewport   from '../../hooks/useViewport';
-import CanvasIcon    from './CanvasIcon';
-import ZoomControls  from './ZoomControls';
+import useDrag         from '../../hooks/useDrag';
+import useViewport     from '../../hooks/useViewport';
+import useZoneDraw     from '../../hooks/useZoneDraw';
+import CanvasIcon      from './CanvasIcon';
+import ZoneRect        from './ZoneRect';
+import ZoomControls    from './ZoomControls';
 
 const CanvasBoard = ({ canvasRef }) => {
   const { mode, showGrid, tk } = useApp();
   const { items, blueprintImg, selectedId, setSelectedId, moveItem } = useLayers();
+  const { zones, setSelectedZoneId } = useZones();
+  const { activeTool } = useTool();
   const [ctrlHeld, setCtrlHeld] = useState(false);
 
   const {
-    zoom, pan,
-    transform, transformOrigin,
-    panHandlers,
-    resetView, zoomTo,
-    isPanning,
+    zoom, pan, transform, transformOrigin,
+    panHandlers, resetView, zoomTo, isPanning,
   } = useViewport(canvasRef);
 
   const zoomRef = useRef(zoom);
@@ -28,10 +31,11 @@ const CanvasBoard = ({ canvasRef }) => {
   zoomRef.current = zoom;
   panRef.current  = pan;
 
-  const getItem    = useCallback((id) => items.find(i => i.id === id) || { xPct: 0, yPct: 0 }, [items]);
-  const getZoom    = useCallback(() => zoomRef.current, []);
-  const getPan     = useCallback(() => panRef.current, []);
+  const getZoom = useCallback(() => zoomRef.current, []);
+  const getPan  = useCallback(() => panRef.current,  []);
+  const getItem = useCallback((id) => items.find(i => i.id === id) || { xPct: 0, yPct: 0 }, [items]);
 
+  // Drag for icons (only active in SELECT tool)
   const drag = useDrag({
     containerRef: canvasRef,
     getItem, onMove: moveItem,
@@ -39,11 +43,43 @@ const CanvasBoard = ({ canvasRef }) => {
     getZoom, getPan,
   });
 
-  const handleMouseDown  = useCallback((e) => { if (isPanning(e)) panHandlers.onMouseDown(e); }, [isPanning, panHandlers]);
-  const handleMouseMove  = useCallback((e) => { panHandlers.onMouseMove(e); drag.onMouseMove(e); }, [panHandlers, drag]);
-  const handleMouseUp    = useCallback((e) => { panHandlers.onMouseUp(e); drag.onMouseUp(e); }, [panHandlers, drag]);
-  const handleMouseLeave = useCallback((e) => { panHandlers.onMouseLeave(e); drag.onMouseLeave(e); }, [panHandlers, drag]);
+  // Zone draw (only active in ZONE tool)
+  const zoneDraw = useZoneDraw(canvasRef, getZoom, getPan);
 
+  // ── Merged mouse handlers depending on active tool ──────────────────────
+  const handleMouseDown = useCallback((e) => {
+    if (activeTool === TOOLS.ZONE) {
+      zoneDraw.onMouseDown(e);
+    } else if (activeTool === TOOLS.PAN || isPanning(e)) {
+      panHandlers.onMouseDown(e);
+    }
+    // SELECT: icon drag is handled inside CanvasIcon's own onMouseDown
+  }, [activeTool, zoneDraw, panHandlers, isPanning]);
+
+  const handleMouseMove = useCallback((e) => {
+    panHandlers.onMouseMove(e);   // pan always tracks (harmless when not dragging)
+    drag.onMouseMove(e);
+    if (activeTool === TOOLS.ZONE) zoneDraw.onMouseMove(e);
+  }, [panHandlers, drag, activeTool, zoneDraw]);
+
+  const handleMouseUp = useCallback((e) => {
+    panHandlers.onMouseUp(e);
+    drag.onMouseUp(e);
+    if (activeTool === TOOLS.ZONE) zoneDraw.onMouseUp(e);
+  }, [panHandlers, drag, activeTool, zoneDraw]);
+
+  const handleMouseLeave = useCallback((e) => {
+    panHandlers.onMouseLeave(e);
+    drag.onMouseLeave(e);
+    if (activeTool === TOOLS.ZONE) zoneDraw.onMouseLeave(e);
+  }, [panHandlers, drag, activeTool, zoneDraw]);
+
+  const handleCanvasClick = useCallback(() => {
+    setSelectedId(null);
+    setSelectedZoneId(null);
+  }, [setSelectedId, setSelectedZoneId]);
+
+  // Ctrl key hint (still works as shorthand pan even in SELECT mode)
   useEffect(() => {
     const down = (e) => { if (e.key === 'Control' || e.key === 'Meta') setCtrlHeld(true); };
     const up   = (e) => { if (e.key === 'Control' || e.key === 'Meta') setCtrlHeld(false); };
@@ -61,6 +97,13 @@ const CanvasBoard = ({ canvasRef }) => {
   const gridBgSize   = `${GRID_SIZE * zoom}px ${GRID_SIZE * zoom}px`;
   const gridBgOffset = `${pan.x % (GRID_SIZE * zoom)}px ${pan.y % (GRID_SIZE * zoom)}px`;
 
+  // Cursor based on tool
+  const cursor = activeTool === TOOLS.ZONE
+    ? 'crosshair'
+    : activeTool === TOOLS.PAN || ctrlHeld
+      ? 'grab'
+      : 'default';
+
   return (
     <Box
       ref={canvasRef}
@@ -70,7 +113,7 @@ const CanvasBoard = ({ canvasRef }) => {
       onMouseLeave={handleMouseLeave}
       onTouchMove={drag.onTouchMove}
       onTouchEnd={drag.onTouchEnd}
-      onClick={() => setSelectedId(null)}
+      onClick={handleCanvasClick}
       sx={{
         flex: 1,
         position: 'relative',
@@ -84,22 +127,20 @@ const CanvasBoard = ({ canvasRef }) => {
           : 'none',
         backgroundSize:     showGrid ? gridBgSize   : 'unset',
         backgroundPosition: showGrid ? gridBgOffset : 'unset',
-        cursor: ctrlHeld ? 'grab' : 'default',
+        cursor,
         userSelect: 'none',
         transition: 'background-color 0.25s',
       }}
     >
-      {/* ── Transformed layer: blueprint + icons zoom/pan together ── */}
+      {/* ── Transformed layer: blueprint + zones + icons ── */}
       <Box sx={{
         position: 'absolute', inset: 0,
         transform, transformOrigin,
         willChange: 'transform',
       }}>
-        {/* Blueprint fills the inner box 100% */}
+        {/* Blueprint */}
         {blueprintImg && (
-          <img
-            src={blueprintImg}
-            alt="Blueprint"
+          <img src={blueprintImg} alt="Blueprint"
             style={{
               position: 'absolute', inset: 0,
               width: '100%', height: '100%',
@@ -110,27 +151,50 @@ const CanvasBoard = ({ canvasRef }) => {
           />
         )}
 
-        {/*
-          Icons use % positioning directly on this inner box.
-          xPct/yPct are fractions of the inner box size (which equals the
-          outer canvas at zoom=1, and scales with the transform at other zooms).
-          This means left: 30% always points to 30% across the blueprint
-          regardless of screen size or zoom level.
-        */}
+        {/* Zones (below icons) */}
+        {zones.map(zone => (
+          <ZoneRect key={zone.id} zone={zone} />
+        ))}
+
+        {/* Icons */}
         {items.map(item => (
           <CanvasIcon
             key={item.id}
             item={item}
             isSelected={selectedId === item.id}
-            onMouseDown={drag.onMouseDown}
+            onMouseDown={activeTool === TOOLS.SELECT ? drag.onMouseDown : (e) => e.stopPropagation()}
             onTouchStart={drag.onTouchStart}
             onClick={setSelectedId}
           />
         ))}
+
+        {/* Zone draw preview */}
+        {zoneDraw.preview && (() => {
+          const p = zoneDraw.preview;
+          const x1 = Math.min(p.x1Pct, p.x2Pct);
+          const y1 = Math.min(p.y1Pct, p.y2Pct);
+          const w  = Math.abs(p.x2Pct - p.x1Pct) * 100;
+          const h  = Math.abs(p.y2Pct - p.y1Pct) * 100;
+          return (
+            <Box sx={{
+              position: 'absolute',
+              left:   `${x1 * 100}%`,
+              top:    `${y1 * 100}%`,
+              width:  `${w}%`,
+              height: `${h}%`,
+              border: `2px dashed ${tk.accent}`,
+              bgcolor: tk.accent + '18',
+              borderRadius: '4px',
+              pointerEvents: 'none',
+              zIndex: 200,
+              boxSizing: 'border-box',
+            }} />
+          );
+        })()}
       </Box>
 
-      {/* ── Empty state (outside transform — always centered in viewport) ── */}
-      {!blueprintImg && items.length === 0 && (
+      {/* ── Empty state ── */}
+      {!blueprintImg && items.length === 0 && zones.length === 0 && (
         <Box sx={{
           position: 'absolute', inset: 0,
           display: 'flex', flexDirection: 'column',
@@ -153,19 +217,31 @@ const CanvasBoard = ({ canvasRef }) => {
         </Box>
       )}
 
-      <ZoomControls zoom={zoom} onZoomChange={handleButtonZoom} onReset={resetView} />
-
-      {ctrlHeld && (
+      {/* ── Active tool hint ── */}
+      {activeTool === TOOLS.ZONE && (
         <Box sx={{
           position: 'absolute', top: 10, left: '50%', transform: 'translateX(-50%)',
           bgcolor: tk.accent + '22', border: `1px solid ${tk.accent}55`,
           borderRadius: 1, px: 1.5, py: 0.4, pointerEvents: 'none', zIndex: 300,
         }}>
           <Typography variant="caption" sx={{ color: tk.accent, fontFamily: 'monospace', fontSize: '0.65rem' }}>
-            CTRL + DRAG TO PAN
+            DRAG TO DRAW A ZONE · DOUBLE-CLICK ZONE TO RENAME
           </Typography>
         </Box>
       )}
+      {activeTool === TOOLS.PAN && (
+        <Box sx={{
+          position: 'absolute', top: 10, left: '50%', transform: 'translateX(-50%)',
+          bgcolor: '#A78BFA22', border: '1px solid #A78BFA55',
+          borderRadius: 1, px: 1.5, py: 0.4, pointerEvents: 'none', zIndex: 300,
+        }}>
+          <Typography variant="caption" sx={{ color: '#A78BFA', fontFamily: 'monospace', fontSize: '0.65rem' }}>
+            DRAG TO PAN CANVAS
+          </Typography>
+        </Box>
+      )}
+
+      <ZoomControls zoom={zoom} onZoomChange={handleButtonZoom} onReset={resetView} />
     </Box>
   );
 };

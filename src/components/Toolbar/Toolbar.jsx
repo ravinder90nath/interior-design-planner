@@ -10,6 +10,7 @@ import ClearAllIcon from '@mui/icons-material/ClearAll';
 import PictureAsPdfIcon from '@mui/icons-material/PictureAsPdf';
 
 import { useApp } from '../../context/AppContext';
+import ToolStrip from './ToolStrip';
 import { useLayers } from '../../context/LayersContext';
 
 const Toolbar = ({ onExportPDF, exporting }) => {
@@ -25,6 +26,7 @@ const Toolbar = ({ onExportPDF, exporting }) => {
   };
 
   return (
+    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
     <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, flexWrap: 'wrap' }}>
       {/* Upload */}
       <Button variant="outlined" size="small" startIcon={<CloudUploadIcon />}
@@ -95,6 +97,8 @@ const Toolbar = ({ onExportPDF, exporting }) => {
           {items.length} item{items.length !== 1 ? 's' : ''}
         </Typography>
       </Box>
+    </Box>
+    <ToolStrip />
     </Box>
   );
 };

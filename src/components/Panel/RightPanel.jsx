@@ -6,6 +6,7 @@ import DeviceList from './DeviceList';
 import PlacementSummary from './PlacementSummary';
 import LayersSummary from './LayersSummary';
 import SelectedItemControls from './SelectedItemControls';
+import ZonesList from './ZonesList';
 
 const RightPanel = ({ canvasRef }) => {
   const { tk } = useApp();
@@ -36,6 +37,8 @@ const RightPanel = ({ canvasRef }) => {
       <Divider sx={{ borderColor: tk.divider, mx: 1.5 }} />
       <LayersSummary />
 
+      <Divider sx={{ borderColor: tk.divider, mx: 1.5 }} />
+      <ZonesList />
       <SelectedItemControls />
 
       <Box sx={{ flex: 1 }} />
