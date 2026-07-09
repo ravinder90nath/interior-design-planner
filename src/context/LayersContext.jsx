@@ -15,7 +15,6 @@ export const LayersProvider = ({ children }) => {
   const [activeLayerId, setActiveLayerId] = useState(initial.id);
   const [selectedId, setSelectedId]       = useState(null);
 
-  /* ── helpers ─────────────────────────────────────────────────────────── */
   const updateLayer = useCallback((id, updater) =>
     setLayers(prev => prev.map(l => l.id === id ? { ...l, ...updater(l) } : l)),
   []);
@@ -29,20 +28,18 @@ export const LayersProvider = ({ children }) => {
     return acc;
   }, {});
 
-  /* ── blueprint ───────────────────────────────────────────────────────── */
+  /* ── blueprint ─────────────────────────────────────────────────────── */
   const setBlueprintImg = useCallback((url) => {
     updateLayer(activeLayerId, () => ({ blueprintImg: url }));
   }, [activeLayerId, updateLayer]);
 
-  /* ── items ───────────────────────────────────────────────────────────── */
+  /* ── items — positions stored as 0-1 fractions (xPct / yPct) ──────── */
   const addItem = useCallback((deviceId, canvasRect) => {
-    const newItem = {
-      id:       nextItemId(),
-      type:     deviceId,
-      rotation: 0,
-      x: 40 + Math.random() * (canvasRect.width  - 120),
-      y: 40 + Math.random() * (canvasRect.height - 120),
-    };
+    const { width, height } = canvasRect;
+    // Random placement in the middle 60% of the canvas
+    const xPct = 0.1 + Math.random() * 0.8;
+    const yPct = 0.1 + Math.random() * 0.8;
+    const newItem = { id: nextItemId(), type: deviceId, rotation: 0, xPct, yPct };
     updateLayer(activeLayerId, l => ({ items: [...l.items, newItem] }));
     setSelectedId(newItem.id);
   }, [activeLayerId, updateLayer]);
@@ -58,10 +55,17 @@ export const LayersProvider = ({ children }) => {
     }));
   }, [activeLayerId, updateLayer]);
 
-  const moveItem = useCallback((id, x, y) => {
+  /**
+   * Called by useDrag with absolute pixel coords (within the current canvas).
+   * We convert immediately to fractions so the position is device-independent.
+   */
+  const moveItem = useCallback((id, xPx, yPx, canvasRect) => {
+    const { width, height } = canvasRect;
+    const xPct = Math.max(0, Math.min(1, xPx / width));
+    const yPct = Math.max(0, Math.min(1, yPx / height));
     setLayers(prev => prev.map(l => {
       if (l.id !== activeLayerId) return l;
-      return { ...l, items: l.items.map(i => i.id === id ? { ...i, x, y } : i) };
+      return { ...l, items: l.items.map(i => i.id === id ? { ...i, xPct, yPct } : i) };
     }));
   }, [activeLayerId]);
 
@@ -86,7 +90,7 @@ export const LayersProvider = ({ children }) => {
   const duplicateLayer = useCallback(() => {
     const copy = {
       ...activeLayer,
-      id:    makeLayer('').id,   // just uses the counter
+      id:    makeLayer('').id,
       name:  `Layer ${layers.length + 1}`,
       items: activeLayer.items.map(i => ({ ...i, id: nextItemId() })),
     };

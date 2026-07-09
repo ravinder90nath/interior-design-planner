@@ -3,11 +3,23 @@ import { Box } from '@mui/material';
 import { useApp } from '../../context/AppContext';
 import { DEVICE_CATALOG, ICON_SIZE } from '../../constants';
 
-const CanvasIcon = ({ item, isSelected, onMouseDown, onTouchStart, onClick }) => {
+/**
+ * A single draggable device icon on the canvas.
+ *
+ * item.xPct / item.yPct are 0-1 fractions of the canvas size.
+ * We convert to pixels here using canvasWidth / canvasHeight,
+ * so the icon renders at the same RELATIVE position on any screen size.
+ */
+const CanvasIcon = ({ item, isSelected, canvasWidth, canvasHeight, onMouseDown, onTouchStart, onClick }) => {
   const { tk } = useApp();
-  const device   = DEVICE_CATALOG.find(d => d.id === item.type);
+  const device  = DEVICE_CATALOG.find(d => d.id === item.type);
   if (!device) return null;
+
   const IconComp = device.icon;
+
+  // Convert stored fractions → current pixel position
+  const left = item.xPct * canvasWidth;
+  const top  = item.yPct * canvasHeight;
 
   return (
     <Box
@@ -16,7 +28,7 @@ const CanvasIcon = ({ item, isSelected, onMouseDown, onTouchStart, onClick }) =>
       onClick={(e) => { e.stopPropagation(); onClick(item.id); }}
       sx={{
         position: 'absolute',
-        left: item.x, top: item.y,
+        left, top,
         width: ICON_SIZE, height: ICON_SIZE,
         cursor: 'grab', '&:active': { cursor: 'grabbing' },
         transform: `rotate(${item.rotation}deg)`,

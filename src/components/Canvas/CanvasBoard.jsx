@@ -15,6 +15,24 @@ const CanvasBoard = ({ canvasRef }) => {
   const { items, blueprintImg, selectedId, setSelectedId, moveItem } = useLayers();
   const [ctrlHeld, setCtrlHeld] = useState(false);
 
+  // Track live canvas pixel dimensions so icons scale correctly on resize
+  const [canvasSize, setCanvasSize] = useState({ width: 0, height: 0 });
+
+  useEffect(() => {
+    const el = canvasRef.current;
+    if (!el) return;
+
+    const update = () => {
+      const r = el.getBoundingClientRect();
+      setCanvasSize({ width: r.width, height: r.height });
+    };
+    update(); // initial measure
+
+    const ro = new ResizeObserver(update);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [canvasRef]);
+
   const {
     zoom, pan,
     transform, transformOrigin,
@@ -29,39 +47,36 @@ const CanvasBoard = ({ canvasRef }) => {
   zoomRef.current = zoom;
   panRef.current  = pan;
 
-  const getItem = useCallback((id) => items.find(i => i.id === id) || { x: 0, y: 0 }, [items]);
+  /**
+   * useDrag needs the current PIXEL position of an item to compute the
+   * drag offset from cursor to icon top-left.
+   * We derive it from the stored fractions + the live canvas size.
+   */
+  const getItem = useCallback((id) => {
+    const item = items.find(i => i.id === id);
+    if (!item) return { xPct: 0, yPct: 0 };
+    return item; // useDrag reads item.xPct / item.yPct directly
+  }, [items]);
+
   const getZoom = useCallback(() => zoomRef.current, []);
   const getPan  = useCallback(() => panRef.current,  []);
 
   const drag = useDrag({
     containerRef: canvasRef,
-    getItem, onMove: moveItem,
+    getItem,
+    onMove: moveItem,
     onSelect: setSelectedId,
-    iconSize: ICON_SIZE,
-    getZoom, getPan,
+    getZoom,
+    getPan,
   });
 
   // Merged handlers: pan (ctrl) + drag (normal)
-  const handleMouseDown = useCallback((e) => {
-    if (isPanning(e)) panHandlers.onMouseDown(e);
-  }, [isPanning, panHandlers]);
+  const handleMouseDown  = useCallback((e) => { if (isPanning(e)) panHandlers.onMouseDown(e); },  [isPanning, panHandlers]);
+  const handleMouseMove  = useCallback((e) => { panHandlers.onMouseMove(e); drag.onMouseMove(e); }, [panHandlers, drag]);
+  const handleMouseUp    = useCallback((e) => { panHandlers.onMouseUp(e);   drag.onMouseUp(e); },   [panHandlers, drag]);
+  const handleMouseLeave = useCallback((e) => { panHandlers.onMouseLeave(e); drag.onMouseLeave(e); }, [panHandlers, drag]);
 
-  const handleMouseMove = useCallback((e) => {
-    panHandlers.onMouseMove(e);
-    drag.onMouseMove(e);
-  }, [panHandlers, drag]);
-
-  const handleMouseUp = useCallback((e) => {
-    panHandlers.onMouseUp(e);
-    drag.onMouseUp(e);
-  }, [panHandlers, drag]);
-
-  const handleMouseLeave = useCallback((e) => {
-    panHandlers.onMouseLeave(e);
-    drag.onMouseLeave(e);
-  }, [panHandlers, drag]);
-
-  // Track Ctrl key for cursor feedback
+  // Track Ctrl key for cursor hint
   useEffect(() => {
     const down = (e) => { if (e.key === 'Control' || e.key === 'Meta') setCtrlHeld(true);  };
     const up   = (e) => { if (e.key === 'Control' || e.key === 'Meta') setCtrlHeld(false); };
@@ -109,13 +124,9 @@ const CanvasBoard = ({ canvasRef }) => {
         transition: 'background-color 0.25s',
       }}
     >
-      {/* ── Transformed content layer (zoom + pan applied here) ── */}
-      <Box sx={{
-        position: 'absolute', inset: 0,
-        transform,
-        transformOrigin,
-        willChange: 'transform',
-      }}>
+      {/* ── Transformed content (zoom + pan) ── */}
+      <Box sx={{ position: 'absolute', inset: 0, transform, transformOrigin, willChange: 'transform' }}>
+
         {blueprintImg && (
           <img
             src={blueprintImg}
@@ -130,11 +141,14 @@ const CanvasBoard = ({ canvasRef }) => {
           />
         )}
 
-        {items.map(item => (
+        {/* Icons — receive live canvas size to convert fractions → pixels */}
+        {canvasSize.width > 0 && items.map(item => (
           <CanvasIcon
             key={item.id}
             item={item}
             isSelected={selectedId === item.id}
+            canvasWidth={canvasSize.width}
+            canvasHeight={canvasSize.height}
             onMouseDown={drag.onMouseDown}
             onTouchStart={drag.onTouchStart}
             onClick={setSelectedId}
@@ -142,7 +156,7 @@ const CanvasBoard = ({ canvasRef }) => {
         ))}
       </Box>
 
-      {/* ── Empty state (outside transform — always centered) ── */}
+      {/* ── Empty state ── */}
       {!blueprintImg && items.length === 0 && (
         <Box sx={{
           position: 'absolute', inset: 0,
@@ -157,8 +171,7 @@ const CanvasBoard = ({ canvasRef }) => {
           }}>
             <CloudUploadIcon sx={{ fontSize: 40, color: tk.accent + '44' }} />
           </Box>
-          <Typography variant="body2" sx={{ color: tk.textDim, fontFamily: 'monospace',
-            letterSpacing: 2, fontSize: '0.7rem' }}>
+          <Typography variant="body2" sx={{ color: tk.textDim, fontFamily: 'monospace', letterSpacing: 2, fontSize: '0.7rem' }}>
             UPLOAD A BLUEPRINT TO BEGIN
           </Typography>
           <Typography variant="caption" sx={{ color: tk.textFaint }}>
@@ -167,21 +180,17 @@ const CanvasBoard = ({ canvasRef }) => {
         </Box>
       )}
 
-      {/* ── Zoom HUD (bottom-left) ── */}
+      {/* ── Zoom HUD ── */}
       <ZoomControls zoom={zoom} onZoomChange={handleButtonZoom} onReset={resetView} />
 
-      {/* ── Ctrl pan hint ── */}
+      {/* ── Ctrl hint ── */}
       {ctrlHeld && (
         <Box sx={{
-          position: 'absolute', top: 10, left: '50%',
-          transform: 'translateX(-50%)',
-          bgcolor: tk.accent + '22',
-          border: `1px solid ${tk.accent}55`,
-          borderRadius: 1, px: 1.5, py: 0.4,
-          pointerEvents: 'none', zIndex: 300,
+          position: 'absolute', top: 10, left: '50%', transform: 'translateX(-50%)',
+          bgcolor: tk.accent + '22', border: `1px solid ${tk.accent}55`,
+          borderRadius: 1, px: 1.5, py: 0.4, pointerEvents: 'none', zIndex: 300,
         }}>
-          <Typography variant="caption"
-            sx={{ color: tk.accent, fontFamily: 'monospace', fontSize: '0.65rem' }}>
+          <Typography variant="caption" sx={{ color: tk.accent, fontFamily: 'monospace', fontSize: '0.65rem' }}>
             CTRL + DRAG TO PAN
           </Typography>
         </Box>

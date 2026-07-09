@@ -1,79 +1,85 @@
 import { useRef, useCallback } from 'react';
+import { ICON_SIZE } from '../constants';
 
 /**
  * Drag handler for canvas icons.
- * Accounts for zoom + pan so dragging feels 1:1 at any zoom level.
  *
- * @param containerRef  ref to the outer canvas container (unzoomed coords)
- * @param getItem       (id) => { x, y } in canvas space
- * @param onMove        (id, x, y) => void
- * @param onSelect      (id) => void
- * @param iconSize      px (default 48)
- * @param getZoom       () => current zoom level
- * @param getPan        () => { x, y } current pan offset
+ * Items are stored as xPct/yPct (0-1 fractions of canvas size).
+ * We convert to pixels for the drag offset calculation, then pass
+ * pixel coords + canvasRect to onMove so LayersContext can convert
+ * back to fractions — keeping positions device-independent.
+ *
+ * @param containerRef   ref to the outer canvas container
+ * @param getItem        (id) => { xPct, yPct } — stored fractions
+ * @param onMove         (id, xPx, yPx, canvasRect) => void
+ * @param onSelect       (id) => void
+ * @param getZoom        () => number
+ * @param getPan         () => { x, y }
  */
-const useDrag = ({ containerRef, getItem, onMove, onSelect, iconSize = 48, getZoom, getPan }) => {
+const useDrag = ({ containerRef, getItem, onMove, onSelect, getZoom, getPan }) => {
   const dragState = useRef(null);
 
-  // Convert a client-space delta to canvas-space delta
-  const toCanvas = useCallback((clientX, clientY) => {
-    const rect = containerRef.current.getBoundingClientRect();
-    const zoom = getZoom ? getZoom() : 1;
-    const pan  = getPan  ? getPan()  : { x: 0, y: 0 };
-    return {
-      x: (clientX - rect.left - pan.x) / zoom,
-      y: (clientY - rect.top  - pan.y) / zoom,
-    };
-  }, [containerRef, getZoom, getPan]);
+  const getRect = () => containerRef.current?.getBoundingClientRect() || { left:0, top:0, width:1, height:1 };
+  const zoom    = () => getZoom ? getZoom() : 1;
+  const pan     = () => getPan  ? getPan()  : { x: 0, y: 0 };
 
-  const clamp = useCallback((val, maxCanvas) =>
-    Math.max(0, Math.min(maxCanvas - iconSize, val)),
-  [iconSize]);
+  /** Convert fraction → pixel in current canvas space */
+  const pctToPx = (xPct, yPct, rect) => ({
+    x: xPct * rect.width,
+    y: yPct * rect.height,
+  });
 
   const startDrag = useCallback((id, clientX, clientY) => {
     onSelect(id);
-    const rect = containerRef.current.getBoundingClientRect();
-    const zoom = getZoom ? getZoom() : 1;
-    const pan  = getPan  ? getPan()  : { x: 0, y: 0 };
+    const rect = getRect();
+    const z    = zoom();
+    const p    = pan();
     const item = getItem(id);
 
-    // offset in canvas space between cursor and item top-left
+    // cursor position in canvas-local space
+    const cursorX = (clientX - rect.left - p.x) / z;
+    const cursorY = (clientY - rect.top  - p.y) / z;
+
+    // item top-left in canvas-local pixels
+    const { x: itemX, y: itemY } = pctToPx(item.xPct, item.yPct, rect);
+
     dragState.current = {
       id,
-      offsetX: (clientX - rect.left - pan.x) / zoom - item.x,
-      offsetY: (clientY - rect.top  - pan.y) / zoom - item.y,
+      offsetX: cursorX - itemX,
+      offsetY: cursorY - itemY,
     };
   }, [containerRef, getItem, onSelect, getZoom, getPan]);
 
   const moveDrag = useCallback((clientX, clientY) => {
     const ds = dragState.current;
     if (!ds) return;
-    const rect = containerRef.current.getBoundingClientRect();
-    const zoom = getZoom ? getZoom() : 1;
-    const pan  = getPan  ? getPan()  : { x: 0, y: 0 };
 
-    // Canvas-space dimensions of the container
-    const canvasW = rect.width  / zoom;
-    const canvasH = rect.height / zoom;
+    const rect  = getRect();
+    const z     = zoom();
+    const p     = pan();
 
-    const x = clamp((clientX - rect.left - pan.x) / zoom - ds.offsetX, canvasW);
-    const y = clamp((clientY - rect.top  - pan.y) / zoom - ds.offsetY, canvasH);
-    onMove(ds.id, x, y);
-  }, [containerRef, clamp, onMove, getZoom, getPan]);
+    // canvas-local position of the icon top-left
+    const rawX  = (clientX - rect.left - p.x) / z - ds.offsetX;
+    const rawY  = (clientY - rect.top  - p.y) / z - ds.offsetY;
+
+    // clamp so icon stays inside the canvas
+    const maxX = rect.width  - ICON_SIZE;
+    const maxY = rect.height - ICON_SIZE;
+    const xPx  = Math.max(0, Math.min(maxX, rawX));
+    const yPx  = Math.max(0, Math.min(maxY, rawY));
+
+    onMove(ds.id, xPx, yPx, rect);
+  }, [containerRef, onMove, getZoom, getPan]);
 
   const endDrag = useCallback(() => { dragState.current = null; }, []);
 
-  /* mouse */
-  const onMouseDown = useCallback((e, id) => {
-    e.stopPropagation();
-    startDrag(id, e.clientX, e.clientY);
-  }, [startDrag]);
-
+  /* ── mouse ── */
+  const onMouseDown  = useCallback((e, id) => { e.stopPropagation(); startDrag(id, e.clientX, e.clientY); }, [startDrag]);
   const onMouseMove  = useCallback((e) => moveDrag(e.clientX, e.clientY), [moveDrag]);
   const onMouseUp    = endDrag;
   const onMouseLeave = endDrag;
 
-  /* touch */
+  /* ── touch ── */
   const onTouchStart = useCallback((e, id) => {
     e.stopPropagation();
     const t = e.touches[0];

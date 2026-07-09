@@ -31,10 +31,14 @@ const renderLayerToDataURL = ({ layer, pageW, pageH, mode, showGrid }) =>
     }
 
     const drawIcons = () => {
-      layer.items.forEach(({ type, x, y, rotation, color: itemColor }) => {
+      layer.items.forEach(({ type, xPct, yPct, rotation, color: itemColor }) => {
         const device = layer._catalog?.find(d => d.id === type);
         const color  = device?.color || itemColor || '#00D4FF';
         const emoji  = device?.emoji || '📦';
+
+        // Convert stored fractions → pixel coords for this page size
+        const x = xPct * pageW;
+        const y = yPct * pageH;
 
         ctx.save();
         ctx.translate(x + 24, y + 24);
