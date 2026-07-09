@@ -1,44 +1,70 @@
 import { useRef, useCallback } from 'react';
 
 /**
- * Returns { onMouseDown, onMouseMove, onMouseUp, onTouchStart, onTouchMove }
- * handlers for dragging items inside a canvas container.
+ * Drag handler for canvas icons.
+ * Accounts for zoom + pan so dragging feels 1:1 at any zoom level.
  *
- * @param {React.RefObject} containerRef  ref to the canvas container div
- * @param {function} getItem              (id) => { x, y } — current position
- * @param {function} onMove               (id, x, y) => void — called on each drag step
- * @param {function} onSelect             (id) => void — called on pointer down
- * @param {number}   iconSize             icon width/height in px (default 48)
+ * @param containerRef  ref to the outer canvas container (unzoomed coords)
+ * @param getItem       (id) => { x, y } in canvas space
+ * @param onMove        (id, x, y) => void
+ * @param onSelect      (id) => void
+ * @param iconSize      px (default 48)
+ * @param getZoom       () => current zoom level
+ * @param getPan        () => { x, y } current pan offset
  */
-const useDrag = ({ containerRef, getItem, onMove, onSelect, iconSize = 48 }) => {
+const useDrag = ({ containerRef, getItem, onMove, onSelect, iconSize = 48, getZoom, getPan }) => {
   const dragState = useRef(null);
 
-  const clamp = useCallback((val, max) => Math.max(0, Math.min(max - iconSize, val)), [iconSize]);
+  // Convert a client-space delta to canvas-space delta
+  const toCanvas = useCallback((clientX, clientY) => {
+    const rect = containerRef.current.getBoundingClientRect();
+    const zoom = getZoom ? getZoom() : 1;
+    const pan  = getPan  ? getPan()  : { x: 0, y: 0 };
+    return {
+      x: (clientX - rect.left - pan.x) / zoom,
+      y: (clientY - rect.top  - pan.y) / zoom,
+    };
+  }, [containerRef, getZoom, getPan]);
+
+  const clamp = useCallback((val, maxCanvas) =>
+    Math.max(0, Math.min(maxCanvas - iconSize, val)),
+  [iconSize]);
 
   const startDrag = useCallback((id, clientX, clientY) => {
     onSelect(id);
     const rect = containerRef.current.getBoundingClientRect();
+    const zoom = getZoom ? getZoom() : 1;
+    const pan  = getPan  ? getPan()  : { x: 0, y: 0 };
     const item = getItem(id);
+
+    // offset in canvas space between cursor and item top-left
     dragState.current = {
       id,
-      offsetX: clientX - rect.left - item.x,
-      offsetY: clientY - rect.top  - item.y,
+      offsetX: (clientX - rect.left - pan.x) / zoom - item.x,
+      offsetY: (clientY - rect.top  - pan.y) / zoom - item.y,
     };
-  }, [containerRef, getItem, onSelect]);
+  }, [containerRef, getItem, onSelect, getZoom, getPan]);
 
   const moveDrag = useCallback((clientX, clientY) => {
-    const ds = dragState.current;   // snapshot — must capture before any setState
+    const ds = dragState.current;
     if (!ds) return;
     const rect = containerRef.current.getBoundingClientRect();
-    const x = clamp(clientX - rect.left - ds.offsetX, rect.width);
-    const y = clamp(clientY - rect.top  - ds.offsetY, rect.height);
+    const zoom = getZoom ? getZoom() : 1;
+    const pan  = getPan  ? getPan()  : { x: 0, y: 0 };
+
+    // Canvas-space dimensions of the container
+    const canvasW = rect.width  / zoom;
+    const canvasH = rect.height / zoom;
+
+    const x = clamp((clientX - rect.left - pan.x) / zoom - ds.offsetX, canvasW);
+    const y = clamp((clientY - rect.top  - pan.y) / zoom - ds.offsetY, canvasH);
     onMove(ds.id, x, y);
-  }, [containerRef, clamp, onMove]);
+  }, [containerRef, clamp, onMove, getZoom, getPan]);
 
   const endDrag = useCallback(() => { dragState.current = null; }, []);
 
   /* mouse */
-  const onMouseDown  = useCallback((e, id) => {
+  const onMouseDown = useCallback((e, id) => {
     e.stopPropagation();
     startDrag(id, e.clientX, e.clientY);
   }, [startDrag]);
@@ -54,12 +80,12 @@ const useDrag = ({ containerRef, getItem, onMove, onSelect, iconSize = 48 }) => 
     startDrag(id, t.clientX, t.clientY);
   }, [startDrag]);
 
-  const onTouchMove  = useCallback((e) => {
+  const onTouchMove = useCallback((e) => {
     const t = e.touches[0];
     moveDrag(t.clientX, t.clientY);
   }, [moveDrag]);
 
-  const onTouchEnd   = endDrag;
+  const onTouchEnd = endDrag;
 
   return { onMouseDown, onMouseMove, onMouseUp, onMouseLeave, onTouchStart, onTouchMove, onTouchEnd };
 };
