@@ -10,6 +10,7 @@ import { GRID_SIZE, ICON_SIZE } from '../../constants';
 import useDrag         from '../../hooks/useDrag';
 import useViewport     from '../../hooks/useViewport';
 import useZoneDraw     from '../../hooks/useZoneDraw';
+import usePolygonDraw  from '../../hooks/usePolygonDraw';
 import CanvasIcon      from './CanvasIcon';
 import ZoneRect        from './ZoneRect';
 import ZoomControls    from './ZoomControls';
@@ -35,7 +36,7 @@ const CanvasBoard = ({ canvasRef }) => {
   const getPan  = useCallback(() => panRef.current,  []);
   const getItem = useCallback((id) => items.find(i => i.id === id) || { xPct: 0, yPct: 0 }, [items]);
 
-  // Drag for icons (only active in SELECT tool)
+  // Icon drag (SELECT tool)
   const drag = useDrag({
     containerRef: canvasRef,
     getItem, onMove: moveItem,
@@ -43,43 +44,75 @@ const CanvasBoard = ({ canvasRef }) => {
     getZoom, getPan,
   });
 
-  // Zone draw (only active in ZONE tool)
-  const zoneDraw = useZoneDraw(canvasRef, getZoom, getPan);
+  // Rect zone draw (ZONE tool)
+  const rectDraw = useZoneDraw(canvasRef, getZoom, getPan, 'rect');
+  // Ellipse zone draw (CIRCLE tool)
+  const circleDraw = useZoneDraw(canvasRef, getZoom, getPan, 'ellipse');
+  // Polygon zone draw (POLYGON tool) — click-based, not drag-based
+  const polyDraw = usePolygonDraw(canvasRef, getZoom, getPan);
 
   // ── Merged mouse handlers depending on active tool ──────────────────────
   const handleMouseDown = useCallback((e) => {
     if (activeTool === TOOLS.ZONE) {
-      zoneDraw.onMouseDown(e);
+      rectDraw.onMouseDown(e);
+    } else if (activeTool === TOOLS.CIRCLE) {
+      circleDraw.onMouseDown(e);
     } else if (activeTool === TOOLS.PAN || isPanning(e)) {
       panHandlers.onMouseDown(e);
     }
-    // SELECT: icon drag is handled inside CanvasIcon's own onMouseDown
-  }, [activeTool, zoneDraw, panHandlers, isPanning]);
+    // SELECT & POLYGON: handled via onClick / icon's own onMouseDown
+  }, [activeTool, rectDraw, circleDraw, panHandlers, isPanning]);
 
   const handleMouseMove = useCallback((e) => {
-    panHandlers.onMouseMove(e);   // pan always tracks (harmless when not dragging)
+    panHandlers.onMouseMove(e);
     drag.onMouseMove(e);
-    if (activeTool === TOOLS.ZONE) zoneDraw.onMouseMove(e);
-  }, [panHandlers, drag, activeTool, zoneDraw]);
+    if (activeTool === TOOLS.ZONE)    rectDraw.onMouseMove(e);
+    if (activeTool === TOOLS.CIRCLE)  circleDraw.onMouseMove(e);
+    if (activeTool === TOOLS.POLYGON) polyDraw.onMouseMove(e);
+  }, [panHandlers, drag, activeTool, rectDraw, circleDraw, polyDraw]);
 
   const handleMouseUp = useCallback((e) => {
     panHandlers.onMouseUp(e);
     drag.onMouseUp(e);
-    if (activeTool === TOOLS.ZONE) zoneDraw.onMouseUp(e);
-  }, [panHandlers, drag, activeTool, zoneDraw]);
+    if (activeTool === TOOLS.ZONE)   rectDraw.onMouseUp(e);
+    if (activeTool === TOOLS.CIRCLE) circleDraw.onMouseUp(e);
+  }, [panHandlers, drag, activeTool, rectDraw, circleDraw]);
 
   const handleMouseLeave = useCallback((e) => {
     panHandlers.onMouseLeave(e);
     drag.onMouseLeave(e);
-    if (activeTool === TOOLS.ZONE) zoneDraw.onMouseLeave(e);
-  }, [panHandlers, drag, activeTool, zoneDraw]);
+    if (activeTool === TOOLS.ZONE)   rectDraw.onMouseLeave(e);
+    if (activeTool === TOOLS.CIRCLE) circleDraw.onMouseLeave(e);
+  }, [panHandlers, drag, activeTool, rectDraw, circleDraw]);
 
-  const handleCanvasClick = useCallback(() => {
+  const handleCanvasClick = useCallback((e) => {
+    if (activeTool === TOOLS.POLYGON) {
+      polyDraw.onClick(e);
+      return;
+    }
     setSelectedId(null);
     setSelectedZoneId(null);
-  }, [setSelectedId, setSelectedZoneId]);
+  }, [activeTool, polyDraw, setSelectedId, setSelectedZoneId]);
 
-  // Ctrl key hint (still works as shorthand pan even in SELECT mode)
+  const handleCanvasDoubleClick = useCallback((e) => {
+    if (activeTool === TOOLS.POLYGON) polyDraw.onDoubleClick(e);
+  }, [activeTool, polyDraw]);
+
+  // Escape cancels in-progress polygon
+  useEffect(() => {
+    const onKeyDown = (e) => {
+      if (e.key === 'Escape' && activeTool === TOOLS.POLYGON) polyDraw.cancelPolygon();
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [activeTool, polyDraw]);
+
+  // Cancel any in-progress polygon when switching away from the tool
+  useEffect(() => {
+    if (activeTool !== TOOLS.POLYGON) polyDraw.cancelPolygon();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTool]);
+
   useEffect(() => {
     const down = (e) => { if (e.key === 'Control' || e.key === 'Meta') setCtrlHeld(true); };
     const up   = (e) => { if (e.key === 'Control' || e.key === 'Meta') setCtrlHeld(false); };
@@ -97,12 +130,12 @@ const CanvasBoard = ({ canvasRef }) => {
   const gridBgSize   = `${GRID_SIZE * zoom}px ${GRID_SIZE * zoom}px`;
   const gridBgOffset = `${pan.x % (GRID_SIZE * zoom)}px ${pan.y % (GRID_SIZE * zoom)}px`;
 
-  // Cursor based on tool
-  const cursor = activeTool === TOOLS.ZONE
-    ? 'crosshair'
-    : activeTool === TOOLS.PAN || ctrlHeld
-      ? 'grab'
-      : 'default';
+  const cursor =
+    activeTool === TOOLS.ZONE || activeTool === TOOLS.CIRCLE || activeTool === TOOLS.POLYGON
+      ? 'crosshair'
+      : activeTool === TOOLS.PAN || ctrlHeld
+        ? 'grab'
+        : 'default';
 
   return (
     <Box
@@ -114,6 +147,7 @@ const CanvasBoard = ({ canvasRef }) => {
       onTouchMove={drag.onTouchMove}
       onTouchEnd={drag.onTouchEnd}
       onClick={handleCanvasClick}
+      onDoubleClick={handleCanvasDoubleClick}
       sx={{
         flex: 1,
         position: 'relative',
@@ -168,9 +202,9 @@ const CanvasBoard = ({ canvasRef }) => {
           />
         ))}
 
-        {/* Zone draw preview */}
-        {zoneDraw.preview && (() => {
-          const p = zoneDraw.preview;
+        {/* Rect zone draw preview */}
+        {rectDraw.preview && (() => {
+          const p = rectDraw.preview;
           const x1 = Math.min(p.x1Pct, p.x2Pct);
           const y1 = Math.min(p.y1Pct, p.y2Pct);
           const w  = Math.abs(p.x2Pct - p.x1Pct) * 100;
@@ -178,19 +212,77 @@ const CanvasBoard = ({ canvasRef }) => {
           return (
             <Box sx={{
               position: 'absolute',
-              left:   `${x1 * 100}%`,
-              top:    `${y1 * 100}%`,
-              width:  `${w}%`,
-              height: `${h}%`,
+              left: `${x1 * 100}%`, top: `${y1 * 100}%`,
+              width: `${w}%`, height: `${h}%`,
               border: `2px dashed ${tk.accent}`,
               bgcolor: tk.accent + '18',
               borderRadius: '4px',
-              pointerEvents: 'none',
-              zIndex: 200,
-              boxSizing: 'border-box',
+              pointerEvents: 'none', zIndex: 200, boxSizing: 'border-box',
             }} />
           );
         })()}
+
+        {/* Ellipse zone draw preview */}
+        {circleDraw.preview && (() => {
+          const p = circleDraw.preview;
+          const x1 = Math.min(p.x1Pct, p.x2Pct);
+          const y1 = Math.min(p.y1Pct, p.y2Pct);
+          const w  = Math.abs(p.x2Pct - p.x1Pct) * 100;
+          const h  = Math.abs(p.y2Pct - p.y1Pct) * 100;
+          return (
+            <Box sx={{
+              position: 'absolute',
+              left: `${x1 * 100}%`, top: `${y1 * 100}%`,
+              width: `${w}%`, height: `${h}%`,
+              border: `2px dashed ${tk.accent}`,
+              bgcolor: tk.accent + '18',
+              borderRadius: '50%',
+              pointerEvents: 'none', zIndex: 200, boxSizing: 'border-box',
+            }} />
+          );
+        })()}
+
+        {/* Polygon draw preview — points + connecting lines */}
+        {activeTool === TOOLS.POLYGON && polyDraw.points.length > 0 && (
+          <svg
+            width="100%" height="100%" viewBox="0 0 100 100" preserveAspectRatio="none"
+            style={{ position: 'absolute', inset: 0, overflow: 'visible', pointerEvents: 'none', zIndex: 200 }}
+          >
+            {/* Committed polygon edges */}
+            <polyline
+              points={polyDraw.points.map(p => `${p.x * 100},${p.y * 100}`).join(' ')}
+              fill="none"
+              stroke={tk.accent}
+              strokeWidth={0.5}
+              vectorEffect="non-scaling-stroke"
+            />
+            {/* Live line from last point to cursor */}
+            {polyDraw.cursorPt && (
+              <line
+                x1={polyDraw.points[polyDraw.points.length - 1].x * 100}
+                y1={polyDraw.points[polyDraw.points.length - 1].y * 100}
+                x2={polyDraw.cursorPt.x * 100}
+                y2={polyDraw.cursorPt.y * 100}
+                stroke={tk.accent}
+                strokeWidth={0.4}
+                strokeDasharray="2,1.5"
+                vectorEffect="non-scaling-stroke"
+              />
+            )}
+            {/* Point markers */}
+            {polyDraw.points.map((p, i) => (
+              <circle
+                key={i}
+                cx={p.x * 100} cy={p.y * 100}
+                r={i === 0 ? 1.4 : 1}
+                fill={i === 0 ? '#fff' : tk.accent}
+                stroke={tk.accent}
+                strokeWidth={0.4}
+                vectorEffect="non-scaling-stroke"
+              />
+            ))}
+          </svg>
+        )}
       </Box>
 
       {/* ── Empty state ── */}
@@ -217,7 +309,7 @@ const CanvasBoard = ({ canvasRef }) => {
         </Box>
       )}
 
-      {/* ── Active tool hint ── */}
+      {/* ── Active tool hints ── */}
       {activeTool === TOOLS.ZONE && (
         <Box sx={{
           position: 'absolute', top: 10, left: '50%', transform: 'translateX(-50%)',
@@ -225,7 +317,29 @@ const CanvasBoard = ({ canvasRef }) => {
           borderRadius: 1, px: 1.5, py: 0.4, pointerEvents: 'none', zIndex: 300,
         }}>
           <Typography variant="caption" sx={{ color: tk.accent, fontFamily: 'monospace', fontSize: '0.65rem' }}>
-            DRAG TO DRAW A ZONE · DOUBLE-CLICK ZONE TO RENAME
+            DRAG TO DRAW A RECTANGLE ZONE
+          </Typography>
+        </Box>
+      )}
+      {activeTool === TOOLS.CIRCLE && (
+        <Box sx={{
+          position: 'absolute', top: 10, left: '50%', transform: 'translateX(-50%)',
+          bgcolor: tk.accent + '22', border: `1px solid ${tk.accent}55`,
+          borderRadius: 1, px: 1.5, py: 0.4, pointerEvents: 'none', zIndex: 300,
+        }}>
+          <Typography variant="caption" sx={{ color: tk.accent, fontFamily: 'monospace', fontSize: '0.65rem' }}>
+            DRAG TO DRAW A CIRCLE / ELLIPSE ZONE
+          </Typography>
+        </Box>
+      )}
+      {activeTool === TOOLS.POLYGON && (
+        <Box sx={{
+          position: 'absolute', top: 10, left: '50%', transform: 'translateX(-50%)',
+          bgcolor: tk.accent + '22', border: `1px solid ${tk.accent}55`,
+          borderRadius: 1, px: 1.5, py: 0.4, pointerEvents: 'none', zIndex: 300,
+        }}>
+          <Typography variant="caption" sx={{ color: tk.accent, fontFamily: 'monospace', fontSize: '0.65rem' }}>
+            CLICK TO ADD POINTS · CLICK FIRST POINT OR DOUBLE-CLICK TO CLOSE · ESC TO CANCEL
           </Typography>
         </Box>
       )}

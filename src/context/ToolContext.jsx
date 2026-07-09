@@ -9,9 +9,11 @@ export const useTool = () => {
 };
 
 export const TOOLS = {
-  SELECT: 'select',   // default — click/drag icons
-  ZONE:   'zone',     // drag to draw a zone rectangle
-  PAN:    'pan',      // pan canvas (same as ctrl+drag but as a tool)
+  SELECT:  'select',   // default — click/drag icons & zones
+  ZONE:    'zone',     // drag to draw a rectangular zone
+  CIRCLE:  'circle',   // drag to draw a circular/elliptical zone
+  POLYGON: 'polygon',  // click points, close the shape for an uneven zone
+  PAN:     'pan',      // pan canvas
 };
 
 export const ToolProvider = ({ children }) => {

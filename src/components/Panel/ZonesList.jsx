@@ -5,7 +5,10 @@ import VisibilityOffIcon from '@mui/icons-material/VisibilityOff';
 import DeleteIcon from '@mui/icons-material/Delete';
 import EditIcon from '@mui/icons-material/Edit';
 import { useApp } from '../../context/AppContext';
-import { useZones } from '../../context/ZonesContext';
+import { useZones, ZONE_SHAPES } from '../../context/ZonesContext';
+import RectangleOutlinedIcon from '@mui/icons-material/RectangleOutlined';
+import CircleOutlinedIcon from '@mui/icons-material/CircleOutlined';
+import TimelineIcon from '@mui/icons-material/Timeline';
 
 const COLOR_PRESETS = [
   '#3B82F6','#10B981','#F59E0B','#EF4444',
@@ -50,6 +53,20 @@ const ZoneRow = ({ zone }) => {
       }}
     >
       <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75, px: 1, py: 0.6 }}>
+        {/* Shape icon */}
+        <Tooltip title={
+          zone.shape === ZONE_SHAPES.ELLIPSE ? 'Circle / Ellipse zone' :
+          zone.shape === ZONE_SHAPES.POLYGON ? 'Free-form zone' : 'Rectangle zone'
+        }>
+          <Box sx={{ display: 'flex', alignItems: 'center', flexShrink: 0, color: tk.textMuted }}>
+            {zone.shape === ZONE_SHAPES.ELLIPSE
+              ? <CircleOutlinedIcon sx={{ fontSize: 13 }} />
+              : zone.shape === ZONE_SHAPES.POLYGON
+                ? <TimelineIcon sx={{ fontSize: 13 }} />
+                : <RectangleOutlinedIcon sx={{ fontSize: 13 }} />}
+          </Box>
+        </Tooltip>
+
         {/* Color dot / picker toggle */}
         <Tooltip title="Change color">
           <Box onClick={(e) => { e.stopPropagation(); setShowColors(v => !v); }}

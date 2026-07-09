@@ -17,26 +17,50 @@ const ZONE_COLORS = [
   '#6366F1', '#84CC16',
 ];
 
+export const ZONE_SHAPES = {
+  RECT:    'rect',     // bounding box: x1Pct,y1Pct,x2Pct,y2Pct
+  ELLIPSE: 'ellipse',  // bounding box: x1Pct,y1Pct,x2Pct,y2Pct (ellipse inscribed in box)
+  POLYGON: 'polygon',  // points: [{x,y}, ...] all in 0-1 fraction space
+};
+
 /**
- * All zone positions stored as fractions (x1Pct, y1Pct, x2Pct, y2Pct)
- * so they stay aligned across screen sizes — same approach as icons.
+ * All zone geometry stored as fractions (0-1) of canvas size so positions
+ * stay aligned across screen sizes — same approach as device icons.
+ *
+ * Rect / Ellipse zones: { x1Pct, y1Pct, x2Pct, y2Pct }
+ * Polygon zones:        { points: [{x,y}, ...] }
  */
 export const ZonesProvider = ({ children }) => {
-  const [zones, setZones]               = useState([]);
+  const [zones, setZones]                   = useState([]);
   const [selectedZoneId, setSelectedZoneId] = useState(null);
 
-  const addZone = useCallback((x1Pct, y1Pct, x2Pct, y2Pct) => {
+  const nextColor = (id) => ZONE_COLORS[(id - 1) % ZONE_COLORS.length];
+
+  // ── Rect / Ellipse ──────────────────────────────────────────────────────
+  const addZone = useCallback((x1Pct, y1Pct, x2Pct, y2Pct, shape = ZONE_SHAPES.RECT) => {
     const id    = nextZoneId();
-    const color = ZONE_COLORS[(id - 1) % ZONE_COLORS.length];
+    const color = nextColor(id);
     const zone  = {
-      id,
-      name:    `Zone ${id}`,
-      color,
-      visible: true,
+      id, name: `Zone ${id}`, color, visible: true, shape,
       x1Pct: Math.min(x1Pct, x2Pct),
       y1Pct: Math.min(y1Pct, y2Pct),
       x2Pct: Math.max(x1Pct, x2Pct),
       y2Pct: Math.max(y1Pct, y2Pct),
+    };
+    setZones(prev => [...prev, zone]);
+    setSelectedZoneId(id);
+    return zone;
+  }, []);
+
+  // ── Polygon (free-form, point by point) ─────────────────────────────────
+  const addPolygonZone = useCallback((points) => {
+    if (!points || points.length < 3) return null;
+    const id    = nextZoneId();
+    const color = nextColor(id);
+    const zone  = {
+      id, name: `Zone ${id}`, color, visible: true,
+      shape: ZONE_SHAPES.POLYGON,
+      points: points.map(p => ({ x: p.x, y: p.y })),
     };
     setZones(prev => [...prev, zone]);
     setSelectedZoneId(id);
@@ -67,7 +91,7 @@ export const ZonesProvider = ({ children }) => {
   return (
     <ZonesContext.Provider value={{
       zones, selectedZoneId, setSelectedZoneId,
-      addZone, updateZone, deleteZone,
+      addZone, addPolygonZone, updateZone, deleteZone,
       toggleZoneVisible, renameZone, recolorZone,
     }}>
       {children}

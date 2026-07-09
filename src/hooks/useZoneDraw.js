@@ -4,12 +4,13 @@ import { useZones } from '../context/ZonesContext';
 const MIN_SIZE_PCT = 0.02; // minimum 2% of canvas in each dimension
 
 /**
- * Hook for drawing zones by dragging on the canvas.
- * Returns drawing state + event handlers to attach to the canvas container.
+ * Hook for drawing rect/ellipse zones by dragging on the canvas.
+ * `shape` is 'rect' or 'ellipse' — passed to addZone so ZoneRect
+ * knows how to render it (square box vs inscribed ellipse).
  *
  * All positions stored as fractions (0-1) of canvas size.
  */
-const useZoneDraw = (containerRef, getZoom, getPan) => {
+const useZoneDraw = (containerRef, getZoom, getPan, shape = 'rect') => {
   const { addZone } = useZones();
   const drawState = useRef(null);
   const [preview, setPreview] = useState(null); // { x1Pct, y1Pct, x2Pct, y2Pct }
@@ -50,17 +51,15 @@ const useZoneDraw = (containerRef, getZoom, getPan) => {
     drawState.current = null;
     setPreview(null);
 
-    // Only create zone if it has meaningful size
     const w = Math.abs(xPct - x1Pct);
     const h = Math.abs(yPct - y1Pct);
     if (w > MIN_SIZE_PCT && h > MIN_SIZE_PCT) {
-      addZone(x1Pct, y1Pct, xPct, yPct);
+      addZone(x1Pct, y1Pct, xPct, yPct, shape);
     }
-  }, [toFraction, addZone]);
+  }, [toFraction, addZone, shape]);
 
   const onMouseLeave = useCallback(() => {
     if (!drawState.current) return;
-    // Cancel draw if mouse leaves canvas
     drawState.current = null;
     setPreview(null);
   }, []);
