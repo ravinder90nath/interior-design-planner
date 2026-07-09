@@ -153,7 +153,7 @@ const CanvasBoard = ({ canvasRef }) => {
 
         {/* Zones (below icons) */}
         {zones.map(zone => (
-          <ZoneRect key={zone.id} zone={zone} />
+          <ZoneRect key={zone.id} zone={zone} canvasRef={canvasRef} />
         ))}
 
         {/* Icons */}
