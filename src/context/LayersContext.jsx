@@ -1,42 +1,61 @@
-import React, { createContext, useContext, useState, useCallback } from 'react';
+import React, { createContext, useContext, useState, useCallback, useEffect } from 'react';
 import { makeLayer, nextItemId } from '../utils/layerFactory';
 
 const LayersContext = createContext(null);
 
 export const useLayers = () => {
   const ctx = useContext(LayersContext);
-  if (!ctx) throw new Error('useLayers must be used inside <LayersProvider>');
+  if (!ctx) throw new Error('useLayers must be inside <LayersProvider>');
   return ctx;
 };
 
-export const LayersProvider = ({ children }) => {
-  const initial = makeLayer('Layer 1');
-  const [layers, setLayers]               = useState([initial]);
-  const [activeLayerId, setActiveLayerId] = useState(initial.id);
+const STORAGE_KEY = (id) => `idt_board_${id}`;
+
+const loadBoard = (projectId) => {
+  try {
+    const saved = localStorage.getItem(STORAGE_KEY(projectId));
+    if (saved) return JSON.parse(saved);
+  } catch {}
+  return null;
+};
+
+const saveBoard = (projectId, data) => {
+  try { localStorage.setItem(STORAGE_KEY(projectId), JSON.stringify(data)); } catch {}
+};
+
+export const LayersProvider = ({ children, projectId }) => {
+  const saved   = projectId ? loadBoard(projectId) : null;
+  const initial = saved?.layers?.[0] ?? makeLayer('Layer 1');
+
+  const [layers, setLayers]               = useState(saved?.layers ?? [initial]);
+  const [activeLayerId, setActiveLayerId] = useState(saved?.activeLayerId ?? initial.id);
   const [selectedId, setSelectedId]       = useState(null);
+
+  // Auto-save to localStorage whenever layers change
+  useEffect(() => {
+    if (projectId) {
+      saveBoard(projectId, { layers, activeLayerId });
+    }
+  }, [layers, activeLayerId, projectId]);
 
   const updateLayer = useCallback((id, updater) =>
     setLayers(prev => prev.map(l => l.id === id ? { ...l, ...updater(l) } : l)),
   []);
 
   const activeLayer  = layers.find(l => l.id === activeLayerId) || layers[0];
-  const items        = activeLayer.items;
-  const blueprintImg = activeLayer.blueprintImg;
+  const items        = activeLayer?.items ?? [];
+  const blueprintImg = activeLayer?.blueprintImg ?? null;
 
   const counts = items.reduce((acc, item) => {
     acc[item.type] = (acc[item.type] || 0) + 1;
     return acc;
   }, {});
 
-  /* ── blueprint ─────────────────────────────────────────────────────── */
   const setBlueprintImg = useCallback((url) => {
     updateLayer(activeLayerId, () => ({ blueprintImg: url }));
   }, [activeLayerId, updateLayer]);
 
-  /* ── items — positions stored as 0-1 fractions (xPct / yPct) ──────── */
   const addItem = useCallback((deviceId, canvasRect) => {
-    const { width, height } = canvasRect;
-    // Random placement in the middle 60% of the canvas
     const xPct = 0.1 + Math.random() * 0.8;
     const yPct = 0.1 + Math.random() * 0.8;
     const newItem = { id: nextItemId(), type: deviceId, rotation: 0, xPct, yPct };
@@ -55,11 +74,6 @@ export const LayersProvider = ({ children }) => {
     }));
   }, [activeLayerId, updateLayer]);
 
-  /**
-   * Called by useDrag with absolute pixel coords (within the current canvas).
-   * We convert immediately to fractions so the position is device-independent.
-   */
-  // xPct / yPct arrive as 0-1 fractions from useDrag — already device-independent
   const moveItem = useCallback((id, xPct, yPct) => {
     setLayers(prev => prev.map(l => {
       if (l.id !== activeLayerId) return l;
@@ -72,7 +86,6 @@ export const LayersProvider = ({ children }) => {
     setSelectedId(null);
   }, [activeLayerId, updateLayer]);
 
-  /* ── layers ──────────────────────────────────────────────────────────── */
   const switchLayer = useCallback((id) => {
     setActiveLayerId(id);
     setSelectedId(null);
