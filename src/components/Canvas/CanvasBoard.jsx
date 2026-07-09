@@ -15,24 +15,6 @@ const CanvasBoard = ({ canvasRef }) => {
   const { items, blueprintImg, selectedId, setSelectedId, moveItem } = useLayers();
   const [ctrlHeld, setCtrlHeld] = useState(false);
 
-  // Track live canvas pixel dimensions so icons scale correctly on resize
-  const [canvasSize, setCanvasSize] = useState({ width: 0, height: 0 });
-
-  useEffect(() => {
-    const el = canvasRef.current;
-    if (!el) return;
-
-    const update = () => {
-      const r = el.getBoundingClientRect();
-      setCanvasSize({ width: r.width, height: r.height });
-    };
-    update(); // initial measure
-
-    const ro = new ResizeObserver(update);
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, [canvasRef]);
-
   const {
     zoom, pan,
     transform, transformOrigin,
@@ -41,58 +23,41 @@ const CanvasBoard = ({ canvasRef }) => {
     isPanning,
   } = useViewport(canvasRef);
 
-  // Stable refs so drag callbacks always read latest zoom/pan
   const zoomRef = useRef(zoom);
   const panRef  = useRef(pan);
   zoomRef.current = zoom;
   panRef.current  = pan;
 
-  /**
-   * useDrag needs the current PIXEL position of an item to compute the
-   * drag offset from cursor to icon top-left.
-   * We derive it from the stored fractions + the live canvas size.
-   */
-  const getItem = useCallback((id) => {
-    const item = items.find(i => i.id === id);
-    if (!item) return { xPct: 0, yPct: 0 };
-    return item; // useDrag reads item.xPct / item.yPct directly
-  }, [items]);
-
-  const getZoom = useCallback(() => zoomRef.current, []);
-  const getPan  = useCallback(() => panRef.current,  []);
+  const getItem    = useCallback((id) => items.find(i => i.id === id) || { xPct: 0, yPct: 0 }, [items]);
+  const getZoom    = useCallback(() => zoomRef.current, []);
+  const getPan     = useCallback(() => panRef.current, []);
 
   const drag = useDrag({
     containerRef: canvasRef,
-    getItem,
-    onMove: moveItem,
+    getItem, onMove: moveItem,
     onSelect: setSelectedId,
-    getZoom,
-    getPan,
+    getZoom, getPan,
   });
 
-  // Merged handlers: pan (ctrl) + drag (normal)
-  const handleMouseDown  = useCallback((e) => { if (isPanning(e)) panHandlers.onMouseDown(e); },  [isPanning, panHandlers]);
+  const handleMouseDown  = useCallback((e) => { if (isPanning(e)) panHandlers.onMouseDown(e); }, [isPanning, panHandlers]);
   const handleMouseMove  = useCallback((e) => { panHandlers.onMouseMove(e); drag.onMouseMove(e); }, [panHandlers, drag]);
-  const handleMouseUp    = useCallback((e) => { panHandlers.onMouseUp(e);   drag.onMouseUp(e); },   [panHandlers, drag]);
+  const handleMouseUp    = useCallback((e) => { panHandlers.onMouseUp(e); drag.onMouseUp(e); }, [panHandlers, drag]);
   const handleMouseLeave = useCallback((e) => { panHandlers.onMouseLeave(e); drag.onMouseLeave(e); }, [panHandlers, drag]);
 
-  // Track Ctrl key for cursor hint
   useEffect(() => {
-    const down = (e) => { if (e.key === 'Control' || e.key === 'Meta') setCtrlHeld(true);  };
+    const down = (e) => { if (e.key === 'Control' || e.key === 'Meta') setCtrlHeld(true); };
     const up   = (e) => { if (e.key === 'Control' || e.key === 'Meta') setCtrlHeld(false); };
     window.addEventListener('keydown', down);
-    window.addEventListener('keyup',   up);
+    window.addEventListener('keyup', up);
     return () => { window.removeEventListener('keydown', down); window.removeEventListener('keyup', up); };
   }, []);
 
-  // Button-driven zoom toward canvas center
   const handleButtonZoom = useCallback((nextZoom) => {
     const rect = canvasRef.current?.getBoundingClientRect();
     if (!rect) return;
     zoomTo(nextZoom, rect.width / 2, rect.height / 2);
   }, [canvasRef, zoomTo]);
 
-  // Grid shifts with pan so it feels anchored
   const gridBgSize   = `${GRID_SIZE * zoom}px ${GRID_SIZE * zoom}px`;
   const gridBgOffset = `${pan.x % (GRID_SIZE * zoom)}px ${pan.y % (GRID_SIZE * zoom)}px`;
 
@@ -124,9 +89,13 @@ const CanvasBoard = ({ canvasRef }) => {
         transition: 'background-color 0.25s',
       }}
     >
-      {/* ── Transformed content (zoom + pan) ── */}
-      <Box sx={{ position: 'absolute', inset: 0, transform, transformOrigin, willChange: 'transform' }}>
-
+      {/* ── Transformed layer: blueprint + icons zoom/pan together ── */}
+      <Box sx={{
+        position: 'absolute', inset: 0,
+        transform, transformOrigin,
+        willChange: 'transform',
+      }}>
+        {/* Blueprint fills the inner box 100% */}
         {blueprintImg && (
           <img
             src={blueprintImg}
@@ -141,14 +110,18 @@ const CanvasBoard = ({ canvasRef }) => {
           />
         )}
 
-        {/* Icons — receive live canvas size to convert fractions → pixels */}
-        {canvasSize.width > 0 && items.map(item => (
+        {/*
+          Icons use % positioning directly on this inner box.
+          xPct/yPct are fractions of the inner box size (which equals the
+          outer canvas at zoom=1, and scales with the transform at other zooms).
+          This means left: 30% always points to 30% across the blueprint
+          regardless of screen size or zoom level.
+        */}
+        {items.map(item => (
           <CanvasIcon
             key={item.id}
             item={item}
             isSelected={selectedId === item.id}
-            canvasWidth={canvasSize.width}
-            canvasHeight={canvasSize.height}
             onMouseDown={drag.onMouseDown}
             onTouchStart={drag.onTouchStart}
             onClick={setSelectedId}
@@ -156,7 +129,7 @@ const CanvasBoard = ({ canvasRef }) => {
         ))}
       </Box>
 
-      {/* ── Empty state ── */}
+      {/* ── Empty state (outside transform — always centered in viewport) ── */}
       {!blueprintImg && items.length === 0 && (
         <Box sx={{
           position: 'absolute', inset: 0,
@@ -180,10 +153,8 @@ const CanvasBoard = ({ canvasRef }) => {
         </Box>
       )}
 
-      {/* ── Zoom HUD ── */}
       <ZoomControls zoom={zoom} onZoomChange={handleButtonZoom} onReset={resetView} />
 
-      {/* ── Ctrl hint ── */}
       {ctrlHeld && (
         <Box sx={{
           position: 'absolute', top: 10, left: '50%', transform: 'translateX(-50%)',

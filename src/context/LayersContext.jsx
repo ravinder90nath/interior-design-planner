@@ -59,10 +59,8 @@ export const LayersProvider = ({ children }) => {
    * Called by useDrag with absolute pixel coords (within the current canvas).
    * We convert immediately to fractions so the position is device-independent.
    */
-  const moveItem = useCallback((id, xPx, yPx, canvasRect) => {
-    const { width, height } = canvasRect;
-    const xPct = Math.max(0, Math.min(1, xPx / width));
-    const yPct = Math.max(0, Math.min(1, yPx / height));
+  // xPct / yPct arrive as 0-1 fractions from useDrag — already device-independent
+  const moveItem = useCallback((id, xPct, yPct) => {
     setLayers(prev => prev.map(l => {
       if (l.id !== activeLayerId) return l;
       return { ...l, items: l.items.map(i => i.id === id ? { ...i, xPct, yPct } : i) };
